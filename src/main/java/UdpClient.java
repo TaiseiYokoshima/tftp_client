@@ -1,8 +1,10 @@
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 
 public class UdpClient {
@@ -38,12 +40,35 @@ public class UdpClient {
         return new DatagramPacket(packet_data, packet_data.length, ip,port);
     }
 
+    public static DatagramPacket generate_write_packet(InetAddress ip, int port, String filepath) throws Exception {
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        stream.write(decode_int_to_unsigned_bytes(2));
+        stream.write((filepath + "\0").getBytes(StandardCharsets.US_ASCII));
+        stream.write(("octet\0").getBytes(StandardCharsets.US_ASCII));
+        byte[] packet_data = stream.toByteArray();
+        return new DatagramPacket(packet_data, packet_data.length, ip,port);
+    }
+
     public DatagramPacket generate_ack_packet(int block_num, InetAddress ip, int port) throws Exception {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         stream.write(decode_int_to_unsigned_bytes(4));
         stream.write(decode_int_to_unsigned_bytes(block_num));
         byte[] packet_data = stream.toByteArray();
         return new DatagramPacket(packet_data, packet_data.length, ip,port);
+    }
+    public DatagramPacket generate_data_packet(int block_num, InetAddress ip, int port, byte[] data) throws Exception {
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        stream.write(decode_int_to_unsigned_bytes(3));
+        stream.write(decode_int_to_unsigned_bytes(block_num));
+        stream.write(data);
+        byte[] packet_data = stream.toByteArray();
+        return new DatagramPacket(packet_data, packet_data.length, ip,port);
+    }
+
+    public DatagramPacket send_data_packet(DatagramSocket socket, int block_num, InetAddress ip, int port, byte[] data) throws Exception {
+        DatagramPacket packet = this.generate_data_packet(block_num, ip, port, data);
+        socket.send(packet);
+        return packet;
     }
 
     public DatagramPacket send_ack_packet(DatagramSocket socket, int block_num, InetAddress ip, int port) throws Exception {
@@ -56,6 +81,13 @@ public class UdpClient {
 
     public DatagramPacket send_read_packet(DatagramSocket socket, InetAddress ip, int port, String filepath) throws Exception {
         DatagramPacket packet = generate_read_packet(ip, port, filepath);
+        socket.send(packet);
+        return packet;
+    }
+
+
+    public DatagramPacket send_write_packet(DatagramSocket socket, InetAddress ip, int port, String filepath) throws  Exception {
+        DatagramPacket packet = generate_write_packet(ip, port, filepath);
         socket.send(packet);
         return packet;
     }
@@ -85,6 +117,31 @@ public class UdpClient {
         }
 
         return new Object[]{false, count};
+    }
+
+    public boolean check_packet_for_ack(DatagramPacket ack_packet, InetAddress ip, int port, int block_num) {
+        byte[] ack_packet_buffer = ack_packet.getData();
+
+        if (block_num == 0) {
+            if (!ack_packet.getAddress().equals(ip) || ack_packet.getPort() == port) {
+                System.out.println("stranger's packet - block 0");
+                return true;
+            }
+        } else {
+            if (!ack_packet.getAddress().equals(ip) || ack_packet.getPort() != port) {
+                System.out.println("stranger's packet");
+                return true;
+            }
+        }
+        if (decode_code(ack_packet_buffer, false) != 4) {
+            System.out.println("not an ack packet");
+            return true;
+        }
+        if (decode_code(ack_packet_buffer, true) != block_num) {
+            System.out.println("wrong block num");
+            return true;
+        }
+        return false;
     }
 
 
@@ -163,8 +220,89 @@ public class UdpClient {
         socket.close();
     }
 
-    public void write(InetAddress ip, int port , String filepath) {
+    public void write(InetAddress ip, int port , String filepath) throws Exception {
         System.out.println("write initiated");
+        System.out.println("Sending file:  " + filepath);
+        DatagramSocket socket = new DatagramSocket();
+
+
+        File f = new File(filepath);
+        byte[] file_bytes = Files.readAllBytes(f.toPath());
+
+        //create a stream to read maximum of 512 bytes at a time
+        ByteArrayInputStream inputStream = new ByteArrayInputStream(file_bytes);
+
+        socket.setSoTimeout(100);
+
+
+
+        DatagramPacket packet = this.send_write_packet(socket, ip, port, filepath);
+
+
+        int block_num = 0;
+        boolean stay = true;
+        int count = 1;
+        while(stay) {
+
+            if (count > 10) {
+                System.err.println("Retransmitted too many times");
+                System.err.println("Terminating Process");
+                socket.close();
+                System.exit(1);
+            }
+
+            byte[] ack_packet_buffer = new byte[4];
+            DatagramPacket ack_packet = new DatagramPacket(ack_packet_buffer, ack_packet_buffer.length);
+
+            try {
+                socket.receive(ack_packet);
+            } catch (SocketTimeoutException e ) {
+                socket.send(packet);
+                System.out.printf("Retransmitted Packet block : %d", block_num);
+                count++;
+                continue;
+            }
+
+
+            boolean check = check_packet_for_ack(ack_packet, ip, port, block_num);
+
+            if (check) continue;
+
+            port = ack_packet.getPort();
+            count = 1;
+
+            System.out.println("_______________________________________________________");
+            System.out.println("available bytes to read: " + inputStream.available());
+            //exit condition
+            //1 now there is no available bytes to be read
+            //2 the available bytes is less than 512 which means this will be last packet
+            // this will provide the last iteration of this loop
+
+            int available = inputStream.available();
+            if (available < 512) {
+                System.out.println("hit last packet");
+                stay = false;
+            }
+
+            int to_read = (stay) ? 512 : available;
+
+            byte[] file_buffer = new byte[to_read];
+            int result = inputStream.read(file_buffer, 0, to_read);
+
+            block_num++;
+
+            packet = this.send_data_packet(socket, block_num, ip, port, file_buffer);
+            System.out.println("block " + block_num + " sent");
+
+
+
+
+
+        }
+
+
+        System.out.println("Write request completed");
+        socket.close();
     }
 
 
