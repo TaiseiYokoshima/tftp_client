@@ -32,23 +32,6 @@ public class UdpClient {
 
     }
 
-    private static String local_filepath;
-    private static String remote_filepath;
-    private static int port;
-    private static InetAddress ip;
-    private static DatagramSocket socket = null;
-    private static Closeable closeable = null;
-
-
-
-
-    public UdpClient(String local, String remote, InetAddress ip, int port) {
-        UdpClient.local_filepath = format_filepath(local);
-        UdpClient.remote_filepath = format_filepath(remote);
-        UdpClient.ip = ip;
-        UdpClient.port = port;
-    }
-
     public static Object[] check_input(String[] args) {
         String usage = "Usage: [get | put] [local filepath] [remote filepath] [hostname] [port (optional)]";
         if (args.length < 3) {
@@ -105,6 +88,26 @@ public class UdpClient {
         return new Object[] {opcode, args[1], args[2] ,ip, port};
     }
 
+
+    public UdpClient(String local, String remote, InetAddress ip, int port) {
+        UdpClient.local_filepath = format_filepath(local);
+        UdpClient.remote_filepath = format_filepath(remote);
+        UdpClient.ip = ip;
+        UdpClient.port = port;
+    }
+
+    private static String local_filepath;
+    private static String remote_filepath;
+    private static int port;
+    private static InetAddress ip;
+    private static DatagramSocket socket = null;
+    private static Closeable closeable = null;
+
+
+
+
+
+
     private static boolean validate_local_path(String filepath) {
         int index = filepath.substring(2).lastIndexOf('/');
         if (index < 0) return true;
@@ -120,7 +123,7 @@ public class UdpClient {
         return output;
     }
 
-    public static void terminate(String message) {
+    private static void terminate(String message) {
         System.err.println(message);
         try {
             if (socket != null)  socket.close();
@@ -131,7 +134,7 @@ public class UdpClient {
         System.exit(1);
     }
 
-    public static byte[] decode_int_to_unsigned_bytes(int num) {
+    private static byte[] decode_int_to_unsigned_bytes(int num) {
         int unsigned16Bit = num & 0xFFFF;
         byte[] bytes = new byte[2];
         bytes[0] = (byte) ((unsigned16Bit >> 8) & 0xFF);
@@ -139,7 +142,7 @@ public class UdpClient {
         return bytes;
     }
 
-    public static int decode_code(byte[] packet, boolean block_num) {
+    private static int decode_code(byte[] packet, boolean block_num) {
         int first;
         int second;
 
@@ -162,7 +165,7 @@ public class UdpClient {
 
 
 
-    public void read() throws Exception {
+    private void read() throws Exception {
         if (!validate_local_path(local_filepath)) terminate("local filepath not valid");
         socket = new DatagramSocket();
         socket.setSoTimeout(500);
@@ -203,13 +206,13 @@ public class UdpClient {
         stream.close();
     }
 
-    public DatagramPacket send_read_packet() throws Exception {
+    private DatagramPacket send_read_packet() throws Exception {
         DatagramPacket packet = generate_read_packet();
         socket.send(packet);
         return packet;
     }
 
-    public static DatagramPacket generate_read_packet() throws Exception {
+    private static DatagramPacket generate_read_packet() throws Exception {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         stream.write(decode_int_to_unsigned_bytes(1));
         stream.write((remote_filepath.substring(2) + "\0").getBytes(StandardCharsets.US_ASCII));
@@ -218,7 +221,7 @@ public class UdpClient {
         return new DatagramPacket(packet_data, packet_data.length, ip,port);
     }
 
-    public static DatagramPacket accept_data_packet(DatagramPacket packet, int block_num) throws Exception {
+    private static DatagramPacket accept_data_packet(DatagramPacket packet, int block_num) throws Exception {
         int count = 0;
         while (true) {
             if (count > 10) terminate("retransmitted too many times - terminating");
@@ -248,7 +251,7 @@ public class UdpClient {
         }
     }
 
-    public static int check_packet_for_data(DatagramPacket packet, int block_num) {
+    private static int check_packet_for_data(DatagramPacket packet, int block_num) {
         if (!packet.getAddress().equals(ip)) {
             System.out.println("ip mismatch - packet dropped block " + block_num);
             return 0;
@@ -298,13 +301,13 @@ public class UdpClient {
         return 1;
     }
 
-    public DatagramPacket send_ack_packet(int block_num) throws Exception {
+    private DatagramPacket send_ack_packet(int block_num) throws Exception {
         DatagramPacket packet = generate_ack_packet(block_num);
         socket.send(packet);
         return packet;
     }
 
-    public static DatagramPacket generate_ack_packet(int block_num) throws Exception {
+    private static DatagramPacket generate_ack_packet(int block_num) throws Exception {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         stream.write(decode_int_to_unsigned_bytes(4));
         stream.write(decode_int_to_unsigned_bytes(block_num));
@@ -312,7 +315,7 @@ public class UdpClient {
         return new DatagramPacket(packet_data, packet_data.length, ip,port);
     }
 
-    public static void updateReadProgress(int block_num, long total_bytes) {
+    private static void updateReadProgress(int block_num, long total_bytes) {
         System.out.printf("\r%d blocks received (%d bytes)", block_num, total_bytes);
     }
 
@@ -320,7 +323,7 @@ public class UdpClient {
 
 
     @SuppressWarnings("unused")
-    public void write() throws Exception {
+    private void write() throws Exception {
         File f = new File(local_filepath);
         if (!f.exists() || f.isDirectory()) terminate("local filepath is absent or a directory");
         System.out.println("Sending file:  " + local_filepath);
@@ -369,13 +372,13 @@ public class UdpClient {
         inputStream.close();
     }
 
-    public static DatagramPacket send_write_packet() throws  Exception {
+    private static DatagramPacket send_write_packet() throws  Exception {
         DatagramPacket packet = generate_write_packet();
         socket.send(packet);
         return packet;
     }
 
-    public static DatagramPacket generate_write_packet() throws Exception {
+    private static DatagramPacket generate_write_packet() throws Exception {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         stream.write(decode_int_to_unsigned_bytes(2));
         stream.write((remote_filepath + "\0").getBytes(StandardCharsets.US_ASCII));
@@ -384,7 +387,7 @@ public class UdpClient {
         return new DatagramPacket(packet_data, packet_data.length, ip,port);
     }
 
-    public static void accept_ack_packet(DatagramPacket packet, int block_num) throws Exception {
+    private static void accept_ack_packet(DatagramPacket packet, int block_num) throws Exception {
         int count = 0;
         while(true) {
             if (count > 10) terminate("retransmitted too many times - terminating");
@@ -417,7 +420,7 @@ public class UdpClient {
         }
     }
 
-    public static int check_packet_for_ack(DatagramPacket ack_packet, int block_num) {
+    private static int check_packet_for_ack(DatagramPacket ack_packet, int block_num) {
         byte[] ack_packet_buffer = ack_packet.getData();
         if (!ack_packet.getAddress().equals(ip)) {
             System.out.println("ip mismatch - packet dropped block " + block_num);
@@ -460,13 +463,13 @@ public class UdpClient {
         return 1;
     }
 
-    public DatagramPacket send_data_packet(int block_num, byte[] data) throws Exception {
+    private DatagramPacket send_data_packet(int block_num, byte[] data) throws Exception {
         DatagramPacket packet = generate_data_packet(block_num, data);
         socket.send(packet);
         return packet;
     }
 
-    public static DatagramPacket generate_data_packet(int block_num, byte[] data) throws Exception {
+    private static DatagramPacket generate_data_packet(int block_num, byte[] data) throws Exception {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         stream.write(decode_int_to_unsigned_bytes(3));
         stream.write(decode_int_to_unsigned_bytes(block_num));
@@ -475,7 +478,7 @@ public class UdpClient {
         return new DatagramPacket(packet_data, packet_data.length, ip,port);
     }
 
-    public static void updateWriteProgress(long progress, long total) {
+    private static void updateWriteProgress(long progress, long total) {
         int width = 50;
         double ratio = (double) progress / total;
         int completed = (int) (ratio * width);
