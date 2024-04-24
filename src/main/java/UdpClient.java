@@ -340,7 +340,8 @@ public class UdpClient {
 
         InetAddress ip = null;
         try {
-             ip = InetAddress.getByName(args[2]);
+             ip = InetAddress.getByName(args[1]);
+             System.out.println(ip);
         } catch (UnknownHostException e) {
             System.err.println("Invalid ip");
             System.exit(1);
@@ -352,8 +353,9 @@ public class UdpClient {
             port = 69;
         } else {
             port = -1;
+            System.out.println(args[2]);
             try {
-                port = Integer.parseInt(args[3]);
+                port = Integer.parseInt(args[2]);
                 if (port > 65535) {
                     System.err.println("Port number should be from 0 to 65535");
                     System.exit(1);
@@ -367,7 +369,7 @@ public class UdpClient {
 
 
         if (port < 0 || ip == null || opcode < 0) throw new RuntimeException("Error caused from parsed arguments");
-        return new Object[] {opcode, args[1], ip, port};
+        return new Object[] {opcode, ip, port, args[3]};
     }
 
 
@@ -375,15 +377,26 @@ public class UdpClient {
     public static void main(String[] args) throws Exception {
         Object[] target =  check_input(args);
         int opcode = (int) target[0];
-        String filepath = (String) target[1];
-        InetAddress ip = (InetAddress) target[2];
-        int port = (int) target[3];
+        InetAddress ip = (InetAddress) target[1];
+        int port = (int) target[2];
+        String filepath = (String) target[3];
+
+        System.out.println(filepath);
 
 
         UdpClient server = new UdpClient();
 
+        long startTime = System.currentTimeMillis();
+
+
         if (opcode == 1) server.read(ip, port, filepath);
         if (opcode == 2) server.write(ip, port, filepath);
+
+        long endTime = System.currentTimeMillis();
+        double duration = (endTime - startTime) / 100.0;
+        System.out.println("ran in " + duration);
+
+
 
 
 
