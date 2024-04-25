@@ -109,6 +109,7 @@ public class UdpClient {
 
 
     private static boolean validate_local_path(String filepath) {
+        //method to check if the write path to the local system is valid
         int index = filepath.substring(2).lastIndexOf('/');
         if (index < 0) return true;
         String directory_path = filepath.substring(0, index);
@@ -117,6 +118,7 @@ public class UdpClient {
     }
 
     private static String format_filepath(String filepath) {
+        //method to format filepath so that access is limited to working directory
         String output = filepath;
         output = output.replace('\\', '/');
         if (!output.startsWith("./")) output = "./" + output;
@@ -124,6 +126,8 @@ public class UdpClient {
     }
 
     private static void terminate(String message) {
+        //method to terminate the process 
+        //closes resources first
         System.err.println(message);
         try {
             if (socket != null)  socket.close();
@@ -135,6 +139,7 @@ public class UdpClient {
     }
 
     private static byte[] decode_int_to_unsigned_bytes(int num) {
+        //method to convert int to bytes and format them as an 16bit unsigned int
         int unsigned16Bit = num & 0xFFFF;
         byte[] bytes = new byte[2];
         bytes[0] = (byte) ((unsigned16Bit >> 8) & 0xFF);
@@ -143,6 +148,9 @@ public class UdpClient {
     }
 
     private static int decode_code(byte[] packet, boolean block_num) {
+        //convert bytes which contain 16bit unsigned int to java int
+        //if block_num is false, it decoded 0th, 1st bytes
+        //if true, it decoded 2nd 3rd, used to decode block_num or error code
         int first;
         int second;
 
@@ -159,6 +167,7 @@ public class UdpClient {
     }
 
     private static String decode_error_message(byte[] buffer) {
+        //decodeds error message
         return new String(Arrays.copyOfRange(buffer, 4, buffer.length), StandardCharsets.US_ASCII).split("\0")[0];
     }
 
@@ -166,12 +175,14 @@ public class UdpClient {
 
 
     private void read() throws Exception {
+        // check if local file exists
         if (!validate_local_path(local_filepath)) terminate("local filepath not valid");
         socket = new DatagramSocket();
         socket.setSoTimeout(500);
 
         DatagramPacket packet = this.send_read_packet();
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        // sets this so when terminate is called its closed
         closeable = stream;
         System.out.println("Receiving file:  " + remote_filepath);
 
@@ -179,24 +190,31 @@ public class UdpClient {
         int block_num = 1;
         long total_bytes = 0;
         while (stay) {
+            //accept data packet
             DatagramPacket data_packet = accept_data_packet(packet, block_num);
+            // calculate length of file data
             int length = data_packet.getLength() - 4;
 
             total_bytes+= length;
             updateReadProgress(block_num, total_bytes);
 
+            //exit condition, if file data size is < 512 
+            //the last block was received
             if (length < 512) {
                 stay = false;
             }
-
+            //write to output stream to construct the file later
             stream.write(data_packet.getData(), 4, length);
 
+            // send ack packet
             packet = send_ack_packet(block_num);
             block_num++;
         }
 
+        //convert the stream to bytes
         byte[] file_bytes = stream.toByteArray();
 
+        //write file to disk
         FileOutputStream fos = new FileOutputStream(local_filepath);
         fos.write(file_bytes);
         fos.close();
@@ -237,7 +255,7 @@ public class UdpClient {
                 continue;
             }
 
-
+            // check fi the packet received is the appropriate packet
             switch (check_packet_for_data(data_packet, block_num)) {
                 case 0: continue;
                 case 2: {
@@ -257,42 +275,49 @@ public class UdpClient {
             return 0;
         }
 
+        //when receiving block one the port number will be different, 
+        //this is an edge case, where you check for the port to be a different number 
+        //then update the port number so that next packet can be checked for equality
         if (block_num == 1) {
             if (packet.getPort() == port) {
                 System.out.println("port mismatch - packet dropped block 1");
                 return 0;
             }
+            //error packet file wasn't found
             if(decode_code(packet.getData(), false) == 5) {
                 System.out.println("error code: " + decode_code(packet.getData(), true));
                 System.out.println("error msg: " + decode_error_message(packet.getData()));
                 terminate("file not found - terminating");
             }
-
             if(decode_code(packet.getData(), false) != 3) {
                 System.out.println("opcode mismatch - packet dropped block 1");
                 return 0;
             }
 
+            //for block one it cannot receive other than block 1. 
+            //thus if it does it indicates that the protocol is misbehaving so terminate
             if(decode_code(packet.getData(), true) != 1) {
                 terminate("block mismatch for the first block - terminating");
             }
-
+            //update the port
             port = packet.getPort();
             return 1;
         }
 
+        // check for port equality for block 2 and onwards
         if (packet.getPort() != port) {
             System.out.println("port mismatch - packet dropped");
             return 0;
         }
-
+        // it should not receive a different opcode, it is misbehaving
         if (decode_code(packet.getData(), false) != 3) {
             terminate("wrong opcode - terminating");
         }
+        // if block number doesn't match the current or previous, the protocol is misbehaving
         if (decode_code(packet.getData(), true) != block_num && decode_code(packet.getData(), true) != block_num - 1) {
             terminate("wrong block - terminating");
         }
-
+        // if block number is the previous, the previous ack wasn't received, thus retransmit
         if (decode_code(packet.getData(), true) == block_num - 1) {
             System.out.println("wrong block - retransmitting");
             return 2;
@@ -347,11 +372,9 @@ public class UdpClient {
         boolean stay = true;
         while(stay) {
             accept_ack_packet(packet, block_num);
-            //exit condition
-            //1 now there is no available bytes to be read
-            //2 the available bytes is less than 512 which means this will be last packet
-            // this will provide the last iteration of this loop
 
+            //exit condition
+            //available data left from the file stream is than 512 bytes
             int available = inputStream.available();
             if (available < 512) stay = false;
 
@@ -426,21 +449,23 @@ public class UdpClient {
             System.out.println("ip mismatch - packet dropped block " + block_num);
             return 0;
         }
-
+        
+        // edge case: ack with block number 0 will have a different port number which is appropriate
+        // after receiving ack 0, update the port number and subsequent blocks should have the updated port number
         if (block_num == 0) {
             if (ack_packet.getPort() == port) {
                 System.out.println("port mismatch - packet dropped block 0");
                 return 0;
             }
-
+            //write filepath was not valid
             if (decode_code(ack_packet_buffer, false) == 5) {
                 terminate("directory in the path not found - terminating");
             }
-
+            //opcode mismatch indicates protocol misbehaving
             if (decode_code(ack_packet_buffer, false) != 4) {
                 terminate("opcode mismatch - terminating");
             }
-
+            //for block 0, it cannot receive any other block number's ack, thus protocol misbehaving
             if (decode_code(ack_packet_buffer, true) != block_num) {
                 terminate("block mismatch - terminating");
             }
@@ -454,11 +479,14 @@ public class UdpClient {
             System.out.println("port mismatch - packed dropped");
             return 0;
         }
-
-
+        //block number is the previous, packet didn't reach thus, retransmit
         if (decode_code(ack_packet_buffer, true) == block_num - 1) {
             System.out.println("mismatch block - retransmitting");
             return 2;
+        }
+        //previous block  number is checked, thus, if it doesn't equal current block number it indicates protocol misbehaving so terminate
+        if (decode_code(ack_packet_buffer, true) != block_num) {
+            terminate("block mismatch - terminating");
         }
         return 1;
     }
