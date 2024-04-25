@@ -139,7 +139,7 @@ public class UdpClient {
     }
 
     private static byte[] decode_int_to_unsigned_bytes(int num) {
-        //method to convert int to bytes and format them as an 16bit unsigned int
+        //method to convert int to bytes and format them as a 16bit unsigned int
         int unsigned16Bit = num & 0xFFFF;
         byte[] bytes = new byte[2];
         bytes[0] = (byte) ((unsigned16Bit >> 8) & 0xFF);
@@ -167,7 +167,7 @@ public class UdpClient {
     }
 
     private static String decode_error_message(byte[] buffer) {
-        //decodeds error message
+        //decodes error message
         return new String(Arrays.copyOfRange(buffer, 4, buffer.length), StandardCharsets.US_ASCII).split("\0")[0];
     }
 
@@ -295,7 +295,7 @@ public class UdpClient {
             }
 
             //for block one it cannot receive other than block 1. 
-            //thus if it does it indicates that the protocol is misbehaving so terminate
+            //thus if it does, it indicates that the protocol is misbehaving so terminate
             if(decode_code(packet.getData(), true) != 1) {
                 terminate("block mismatch for the first block - terminating");
             }
